@@ -5,6 +5,8 @@
 */
 
 #include <string.h>
+#include "cpuminer-config.h"
+#include "miner.h"
 
 #include "scrypt-jane.h"
 #include "code/scrypt-jane-portable.h"
@@ -183,4 +185,46 @@ scrypt(const uint8_t *password, size_t password_len, const uint8_t *salt, size_t
 
 	scrypt_free(&V);
 	scrypt_free(&YX);
+}
+
+#define SCRYPT_BUFFER_SIZE (3 * 131072 + 63)
+unsigned char *scrypt_buffer_alloc() {
+    return malloc(SCRYPT_BUFFER_SIZE);
+}
+
+void scrypt_buffer_free(void *scratchpad)
+{
+    free(scratchpad);
+}
+
+static void scryptv_hash(const void* input, size_t inputlen, uint32_t *res, unsigned char Nfactor)
+{
+    return scrypt((const unsigned char*)input, inputlen,
+                  (const unsigned char*)input, inputlen,
+                  9, 5, 0, (unsigned char*)res, 32);
+}
+
+int scanhash_scrypt(int thr_id, uint32_t *pdata,
+	unsigned char *scratchbuf, const uint32_t *ptarget,
+	uint32_t max_nonce, unsigned long *hashes_done)
+{
+	uint32_t data[80], hash[32];
+	uint32_t n = pdata[19] - 1;
+	const uint32_t Htarg = ptarget[7];
+	int i;
+	do {
+		data[19] = swab32(++n);
+
+		scryptv_hash(data, 80, hash, 12);
+		
+		if (hash[7] <= Htarg && fulltest(hash, ptarget)) {
+			*hashes_done = n - pdata[19] + 1;
+			pdata[19] = swab32(data[19]);
+			return 1;
+		}
+	} while (n < max_nonce && !work_restart[thr_id].restart);
+	
+	*hashes_done = n - pdata[19] + 1;
+	pdata[19] = n;
+	return 0;
 }
